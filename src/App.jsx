@@ -1,23 +1,21 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 
-// --- THE CORRECTED IMPORTS ---
+// --- THIS IS THE CORRECTED IMPORT SECTION ---
 import { auth } from './firebase';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { 
     startNewStockTakeSession, 
     getActiveStockTakeSession, 
     finishStockTakeSession, 
-    getAllInventoryItems, 
-    findInventoryItemById, 
-    updateStockCount 
+    findInventoryItemById 
 } from './firestoreAPI';
+// ---
 import { SessionScreen } from './components/SessionScreen';
 import { ChecklistScreen } from './components/ChecklistScreen';
 import { CountingModal } from './components/CountingModal';
 import './App.css';
 import tojemLogo from './assets/tojem-logo.png';
-
 
 function App() {
   const [isReady, setIsReady] = useState(false);
@@ -51,38 +49,46 @@ function App() {
     authenticateApp();
   }, []);
 
-  const onScanSuccess = async (decodedText) => {
-    stopScanner();
-    if (scanContext.mode === 'verify') {
-        if (decodedText === scanContext.expectedId) {
-            setSelectedItem(prev => ({ ...prev, isVerified: true }));
-        } else {
-            alert("Wrong item scanned! Please scan the QR code for the correct item.");
+  useEffect(() => {
+    if (isScanning) {
+      const onScanSuccess = async (decodedText) => {
+        stopScanner();
+        if (scanContext.mode === 'verify') {
+            if (decodedText === scanContext.expectedId) {
+                setSelectedItem(prev => ({ ...prev, isVerified: true }));
+            } else {
+                alert("Wrong item scanned! Please scan the QR code for the correct item.");
+            }
+        } else { 
+            try {
+                const item = await findInventoryItemById(decodedText);
+                setSelectedItem(item);
+            } catch (err) {
+                alert(err.message);
+            }
         }
-    } else { 
-        try {
-            const item = await findInventoryItemById(decodedText);
-            setSelectedItem(item);
-        } catch (err) {
-            alert(err.message);
-        }
+      };
+      
+      const config = { fps: 10, qrbox: { width: 250, height: 250 }};
+      scannerRef.current = new Html5Qrcode("qr-reader-modal");
+      scannerRef.current.start({ facingMode: "environment" }, config, onScanSuccess)
+          .catch(err => {
+              console.error("Scanner start error", err);
+              stopScanner();
+          });
     }
-  };
+
+    return () => {
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        scannerRef.current.stop().catch(err => console.error("Failed to stop scanner on cleanup.", err));
+      }
+    };
+  }, [isScanning, scanContext]);
+
 
   const startScanner = (context = { mode: 'general', expectedId: null }) => {
     setScanContext(context);
-    const scannerElementId = "qr-reader-modal";
-    if (!scannerRef.current) {
-        scannerRef.current = new Html5Qrcode(scannerElementId);
-    }
     setIsScanning(true);
-
-    const config = { fps: 10, qrbox: { width: 250, height: 250 }};
-    scannerRef.current.start({ facingMode: "environment" }, config, onScanSuccess)
-        .catch(err => {
-            console.error("Scanner start error", err);
-            stopScanner();
-        });
   };
 
   const stopScanner = () => {
@@ -91,7 +97,7 @@ function App() {
     }
     setIsScanning(false);
   };
-
+  
   const handleStartNewSession = async () => {
       const newSessionId = await startNewStockTakeSession();
       setActiveSessionId(newSessionId);
@@ -130,15 +136,13 @@ function App() {
   
   return (
     <div>
-      <header style={{ marginBottom: '2rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
-        <img src={tojemLogo} alt="TOJEM Logo" style={{ height: '60px' }} />
-        <h1 style={{ fontSize: '2.5rem', color: '#7dd3fc', letterSpacing: '1px', margin: 0 }}>
-          Stock Taker
-        </h1>
+      <header style={{ marginBottom: '2rem', textAlign: 'center' }}>
+        <img src={tojemLogo} alt="TOJEM Logo" style={{ height: '80px' }} />
       </header>
 
       <main>
         {renderCurrentView()}
+
         {selectedItem && (
             <CountingModal 
                 item={selectedItem}
@@ -147,6 +151,7 @@ function App() {
                 onVerifyScanRequest={() => startScanner({ mode: 'verify', expectedId: selectedItem.id })}
             />
         )}
+        
         {isScanning && (
             <div className="modal-backdrop">
                 <div className="card" style={{maxWidth: '500px', width: '100%'}}>
